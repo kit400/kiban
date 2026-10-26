@@ -300,6 +300,12 @@ const WEB_SCANNER_SIGNATURES: &[&[u8]] = &[
     b"/GponForm/",
     b"/autodiscover/autodiscover.json",
     b"/XDEBUG_SESSION_START",
+    b"/wp-config",
+    b"/phpinfo",
+    b"/solr/",
+    b"/telescope/",
+    b"/.vscode/",
+    b"/wp-includes/",
 ];
 
 /// Fast zero-allocation matcher for Nginx / Caddy / Apache access logs (Combined & JSON).
@@ -435,6 +441,7 @@ pub fn match_http_error(line: &[u8]) -> Option<MatchResult> {
         b"ModSecurity: Access denied",
         b"Primary script unknown",
         b"limiting requests, excess:",
+        b"client denied by server configuration",
     ];
 
     let mut matched = false;
@@ -540,7 +547,7 @@ mod tests {
         let r3 = match_sshd(l3).unwrap();
         assert_eq!(r3.ip, IpKey::V4(u32::from(Ipv4Addr::new(198, 51, 100, 7))));
 
-        let benign = b"Oct 20 14:22:10 srv sshd[1237]: Accepted publickey for deploy from 192.168.1.10 port 52222 ssh2";
+        let benign = b"Oct 20 14:22:10 srv sshd[1237]: Accepted publickey for ip from 192.168.1.10 port 52222 ssh2";
         assert!(match_sshd(benign).is_none());
     }
 

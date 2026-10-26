@@ -263,7 +263,7 @@ impl IpTracker {
                         bantime_secs,
                         failures,
                         strikes,
-                        report_to_ipspace: false,
+                        report_to_ipspace: true,
                         via_ipspace: true,
                     });
                 }
@@ -387,7 +387,7 @@ mod tests {
         assert_eq!(dec.bantime_secs, 604800);
         assert_eq!(dec.failures, 1);
         assert!(dec.via_ipspace);
-        assert!(!dec.report_to_ipspace);
+        assert!(dec.report_to_ipspace);
 
         // 2. Whitelisted IP via API: ignored across all attempts in the window, queried only once
         let good_ip = IpKey::V4(u32::from(Ipv4Addr::new(198, 51, 100, 77)));

@@ -782,27 +782,31 @@ fn grep_jail_logs_for_ip(cfg: &Config, ip_needle: &str, max_lines: usize) -> Vec
 
     for jail in &cfg.jails {
         for src in &jail.sources {
-            if let LogSource::File(path) = src {
-                if searched_files.contains(path) {
-                    continue;
-                }
-                searched_files.push(path.clone());
-                if let Ok(file) = File::open(path) {
-                    let reader = BufReader::new(file);
-                    let mut file_hits = Vec::new();
-                    for line in reader.lines().map_while(Result::ok) {
-                        if line.contains(ip_needle)
-                            && !line.contains("COMMAND=")
-                            && !line.contains("\"GET /api?")
-                            && !line.contains("\"GET /api/")
-                        {
-                            file_hits.push(format!("[{}] {}", jail.name, line));
+            if let LogSource::File(path_pattern) = src {
+                let paths = crate::config::resolve_file_sources(path_pattern);
+                for path in paths {
+                    let path_str = path.display().to_string();
+                    if searched_files.contains(&path_str) {
+                        continue;
+                    }
+                    searched_files.push(path_str);
+                    if let Ok(file) = File::open(&path) {
+                        let reader = BufReader::new(file);
+                        let mut file_hits = Vec::new();
+                        for line in reader.lines().map_while(Result::ok) {
+                            if line.contains(ip_needle)
+                                && !line.contains("COMMAND=")
+                                && !line.contains("\"GET /api?")
+                                && !line.contains("\"GET /api/")
+                            {
+                                file_hits.push(format!("[{}] {}", jail.name, line));
+                            }
                         }
+                        if file_hits.len() > max_lines {
+                            file_hits = file_hits.split_off(file_hits.len() - max_lines);
+                        }
+                        results.extend(file_hits);
                     }
-                    if file_hits.len() > max_lines {
-                        file_hits = file_hits.split_off(file_hits.len() - max_lines);
-                    }
-                    results.extend(file_hits);
                 }
             }
         }

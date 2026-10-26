@@ -155,6 +155,54 @@ impl LogSource {
     }
 }
 
+pub fn glob_matches(name: &str, pattern: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    if pattern == "*.error.log" {
+        return name.ends_with(".error.log");
+    }
+    if pattern == "*.log" {
+        return name.ends_with(".log") && !name.ends_with(".error.log");
+    }
+    if let Some(suffix) = pattern.strip_prefix('*') {
+        return name.ends_with(suffix);
+    }
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return name.starts_with(prefix);
+    }
+    if let Some((prefix, suffix)) = pattern.split_once('*') {
+        return name.starts_with(prefix) && name.ends_with(suffix) && name.len() >= prefix.len() + suffix.len();
+    }
+    name == pattern
+}
+
+pub fn resolve_file_sources(pattern_path: &str) -> Vec<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let pb = PathBuf::from(pattern_path);
+    if pattern_path.contains('*') || pattern_path.contains('?') {
+        let parent = pb.parent().unwrap_or_else(|| Path::new("."));
+        let pattern = pb.file_name().and_then(|f| f.to_str()).unwrap_or("*");
+        let mut list = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
+                        if glob_matches(file_name, pattern) {
+                            list.push(path);
+                        }
+                    }
+                }
+            }
+        }
+        list.sort();
+        list
+    } else {
+        vec![pb]
+    }
+}
+
 /// Built-in or custom log parser profile.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParserKind {
@@ -803,6 +851,18 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_glob_matching() {
+        assert!(glob_matches("example.com.log", "*.log"));
+        assert!(!glob_matches("example.com.error.log", "*.log"));
+        assert!(glob_matches("example.com.error.log", "*.error.log"));
+        assert!(!glob_matches("example.com.bytes", "*.log"));
+        assert!(!glob_matches("example.com.log.1", "*.log"));
+        assert!(!glob_matches("example.com.log.2.gz", "*.log"));
+        assert!(glob_matches("nginx.access.log", "nginx*"));
+        assert!(glob_matches("test_foo_bar.txt", "test*bar.txt"));
+    }
 
     #[test]
     fn test_cidr_matching() {

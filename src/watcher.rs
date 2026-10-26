@@ -160,7 +160,7 @@ impl FileTailer {
                 inotify_add_watch(
                     inotify_fd,
                     c_path.as_ptr(),
-                    IN_CREATE | IN_MOVED_TO | IN_MODIFY,
+                    IN_CREATE | IN_MOVED_TO,
                 )
             };
             if wd >= 0 {
@@ -481,13 +481,15 @@ pub fn run_daemon(cfg: &mut Config, config_path: Option<&str>) -> Result<(), Str
         for src in &jail.sources {
             match src {
                 LogSource::File(p) => {
-                    let pb = PathBuf::from(p);
-                    if let Some(existing) = file_tailers.iter_mut().find(|t| t.path == pb) {
-                        if !existing.jail_indices.contains(&jail_idx) {
-                            existing.jail_indices.push(jail_idx);
+                    let paths = crate::config::resolve_file_sources(p);
+                    for path in paths {
+                        if let Some(existing) = file_tailers.iter_mut().find(|t| t.path == path) {
+                            if !existing.jail_indices.contains(&jail_idx) {
+                                existing.jail_indices.push(jail_idx);
+                            }
+                        } else {
+                            file_tailers.push(FileTailer::new(path, vec![jail_idx]));
                         }
-                    } else {
-                        file_tailers.push(FileTailer::new(pb, vec![jail_idx]));
                     }
                 }
                 LogSource::Journal(unit) => {
@@ -641,6 +643,12 @@ pub fn run_daemon(cfg: &mut Config, config_path: Option<&str>) -> Result<(), Str
                 );
                 if ban.report_to_ipspace {
                     crate::ipspace::report_ban_async(&cfg.ipspace, ban.ip, &jail.reason, cfg.dry_run);
+                    eprintln!(
+                        "[kiban] REPORTED BAN ip={} jail={} reason={} to ip.space.ua",
+                        ban.ip.format_nft(),
+                        jail.name,
+                        jail.reason
+                    );
                 }
             }
             if let Err(e) = fw.apply_bans(&pending_bans) {

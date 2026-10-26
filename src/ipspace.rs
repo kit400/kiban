@@ -134,6 +134,7 @@ pub fn query_ip(
         .args([
             "-s",
             "-S",
+            "-L",
             "-m",
             &timeout_str,
             "--connect-timeout",
@@ -164,6 +165,7 @@ pub fn fetch_dossier_summary(cfg: &IpSpaceConfig, ip: IpKey) -> Result<String, S
         .args([
             "-s",
             "-S",
+            "-L",
             "-m",
             &timeout_str,
             "--connect-timeout",
@@ -259,6 +261,7 @@ pub fn report_ban_async(cfg: &IpSpaceConfig, ip: IpKey, reason: &str, dry_run: b
     if let Ok(child) = Command::new("curl")
         .args([
             "-s",
+            "-L",
             "-m",
             &timeout_str,
             "--connect-timeout",
@@ -338,7 +341,7 @@ mod tests {
     #[test]
     fn test_parse_ipspace_verdict_ban() {
         let sample_json = r#"{
-            "ipAddress": "203.0.113.126",
+            "ipAddress": "80.94.92.126",
             "action": "found",
             "reason": "SSH",
             "AIDBisWhitelisted": 0,

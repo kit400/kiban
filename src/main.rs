@@ -302,7 +302,26 @@ fn run_test_log(cfg: &Config, log_path: &str) -> Result<(), String> {
         .filter(|&i| {
             cfg.jails[i].enabled
                 && cfg.jails[i].sources.iter().any(|s| match s {
-                    config::LogSource::File(p) => p == log_path,
+                    config::LogSource::File(p) => {
+                        if p == log_path {
+                            true
+                        } else if p.contains('*') || p.contains('?') {
+                            let pb = std::path::Path::new(log_path);
+                            let parent = pb.parent().unwrap_or_else(|| std::path::Path::new("."));
+                            let p_parent = std::path::Path::new(p).parent().unwrap_or_else(|| std::path::Path::new("."));
+                            if parent == p_parent {
+                                if let (Some(fname), Some(pattern)) = (pb.file_name().and_then(|f| f.to_str()), std::path::Path::new(p).file_name().and_then(|f| f.to_str())) {
+                                    config::glob_matches(fname, pattern)
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    }
                     _ => false,
                 })
         })

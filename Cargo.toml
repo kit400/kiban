@@ -1,0 +1,22 @@
+[package]
+name = "kiban"
+version = "0.1.0"
+edition = "2021"
+description = "Ultra-lightweight Fail2Ban alternative in Rust using epoll, inotify, journald, and nftables sets with kernel timeouts"
+repository = "https://github.com/kit400/kiban"
+homepage = "https://github.com/kit400/kiban"
+license = "MIT"
+readme = "README.md"
+keywords = ["fail2ban", "nftables", "security", "firewall", "intrusion-prevention"]
+categories = ["command-line-utilities", "network-programming"]
+
+[dependencies]
+# Zero external dependencies to guarantee minimal binary size (<420 KB),
+# zero heap bloat, instant compilation, and minimal RSS RAM usage.
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

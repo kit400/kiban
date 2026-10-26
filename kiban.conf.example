@@ -1,0 +1,109 @@
+# =============================================================================
+# kiban.conf — Ultra-lightweight intrusion prevention daemon (Rust + nftables)
+# Repository: https://github.com/kit400/kiban
+# =============================================================================
+
+[global]
+# nftables family, table, and named set names (created automatically on startup)
+nft_family = "inet"
+nft_table = "kiban"
+nft_set_v4 = "blacklist_v4"
+nft_set_v6 = "blacklist_v6"
+
+# Hard upper bound on tracked offending IPs in the open-addressing ring table.
+# Each slot occupies exactly 24 bytes (8192 slots = 192 KB of RAM).
+# Strictly bounds memory usage and prevents OOM under massive DDoS/botnet attacks.
+max_tracked_ips = 8192
+
+# Dry-run mode (if true, prints nft commands to stderr without executing them)
+dry_run = false
+
+# Comma-separated list of whitelisted IPv4/IPv6 addresses and CIDR subnets
+whitelist = "127.0.0.0/8, ::1/128, fe80::/10, 10.0.0.0/8, 192.168.0.0/16"
+
+
+# -----------------------------------------------------------------------------
+# ip.space.ua Threat Intelligence API Integration
+# Docs: https://ip.space.ua/docs#endpoint-query
+# -----------------------------------------------------------------------------
+[ipspace]
+enabled = false
+endpoint = "https://ip.space.ua/api"
+token = "YOUR_API_TOKEN"
+source = "IPrepDB"
+timeout_secs = 3
+# Risk score threshold (0..=100) for immediate ban on the very first log event (action=found)
+risk_threshold = 75
+# Report local maxretry bans back to ip.space.ua with action=ban
+report_ban = true
+
+
+# -----------------------------------------------------------------------------
+# OpenSSH (sshd) brute-force protection
+# -----------------------------------------------------------------------------
+[jail.sshd]
+enabled = true
+reason = "SSH"
+# Supports both log files (via inotify) and systemd-journald units (comma-separated):
+# source = "file:/var/log/auth.log, journal:ssh.service"
+source = "file:/var/log/auth.log"
+parser = "sshd"
+maxretry = 5
+findtime = 5m
+bantime = 1h
+# Exponential backoff multiplier for repeat offenders (1h -> 4h -> 16h -> 64h...)
+bantime_multiplier = 4
+max_bantime = 7d
+
+
+# -----------------------------------------------------------------------------
+# Web server access log protection (Nginx / Caddy / Apache — brute-force & scanners)
+# -----------------------------------------------------------------------------
+[jail.http-access]
+enabled = true
+source = "file:/var/log/nginx/access.log"
+parser = "http-access"
+# Offense weight assigned to known exploit/scanner URI probes
+# (e.g. /.env, /.git/, /wp-login.php, /xmlrpc.php, /phpmyadmin, /vendor/phpunit, ../).
+# With scanner_weight = 5 and maxretry = 5, a single /.env probe triggers an immediate ban.
+scanner_weight = 5
+maxretry = 5
+findtime = 2m
+bantime = 2h
+bantime_multiplier = 4
+max_bantime = 14d
+
+
+# -----------------------------------------------------------------------------
+# Web server error log protection (Nginx / Apache error.log)
+# -----------------------------------------------------------------------------
+[jail.http-error]
+enabled = false
+source = "file:/var/log/nginx/error.log"
+parser = "http-error"
+maxretry = 5
+findtime = 5m
+bantime = 1h
+bantime_multiplier = 2
+max_bantime = 7d
+
+
+# -----------------------------------------------------------------------------
+# Custom application log protection (zero-regex substring anchor + token parser)
+# -----------------------------------------------------------------------------
+[jail.custom-app]
+enabled = false
+source = "file:/var/log/myapp/security.log"
+parser = "custom"
+# Pipe-separated substring anchors (at least one must appear in the line):
+match = "AUTH_FAILED | INVALID_API_KEY | BRUTEFORCE"
+# Optional pipe-separated substrings to ignore:
+ignore = "healthcheck | internal"
+# Optional marker immediately preceding the IP address
+# (if omitted, kiban scans the line for the first valid IPv4/IPv6 token):
+ip_after = "client_ip= | from "
+maxretry = 4
+findtime = 3m
+bantime = 30m
+bantime_multiplier = 3
+max_bantime = 3d

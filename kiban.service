@@ -1,0 +1,32 @@
+[Unit]
+Description=kiban — Ultra-lightweight Fail2Ban alternative (Rust + nftables)
+Documentation=https://github.com/kit400/kiban
+After=network.target nftables.service
+Wants=nftables.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kiban run -c /etc/kiban/kiban.conf
+Restart=always
+RestartSec=2s
+
+# Strict resource limits (typical kiban daemon memory usage is ~0.5-2.4 MB RSS;
+# 16M headroom accommodates short-lived curl TLS subprocesses for ip.space.ua queries)
+MemoryAccounting=true
+MemoryMax=16M
+CPUAccounting=true
+CPUQuota=5%
+
+# Kernel capability and filesystem hardening
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_NET_ADMIN CAP_DAC_READ_SEARCH
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

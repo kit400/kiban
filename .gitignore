@@ -1,0 +1,31 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# Local configuration & secrets (never commit real configs or deploy targets)
+kiban.conf
+*.conf
+!kiban.conf.example
+.env
+.env.*
+.deploy.env
+
+# Logs & temporary files
+*.log
+*.log.*
+*.tmp
+*.bak
+
+# AI assistant & editor directories
+.agents/
+.agent/
+.gemini/
+GEMINI.md
+AGENTS.md
+CLAUDE.md
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store

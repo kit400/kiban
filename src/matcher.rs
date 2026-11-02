@@ -305,7 +305,6 @@ const WEB_SCANNER_SIGNATURES: &[&[u8]] = &[
     b"/solr/",
     b"/telescope/",
     b"/.vscode/",
-    b"/wp-includes/",
 ];
 
 /// Fast zero-allocation matcher for Nginx / Caddy / Apache access logs (Combined & JSON).
@@ -567,6 +566,10 @@ mod tests {
         let m3 = match_http_access(json_line, 5).unwrap();
         assert_eq!(m3.ip, IpKey::V4(u32::from(Ipv4Addr::new(198, 51, 100, 88))));
         assert_eq!(m3.weight, 5);
+
+        // Legitimate WordPress static assets from /wp-includes/ must NOT be flagged as scanner
+        let wp_asset = b"176.37.120.53 - - [01/Nov/2026:16:31:53 +0000] \"GET /wp-includes/js/jquery/jquery.min.js?ver=3.7.1 HTTP/2.0\" 200 30419 \"https://example.com/\" \"Mozilla/5.0\"";
+        assert!(match_http_access(wp_asset, 5).is_none());
 
         let ok_line = b"198.51.100.1 - - [20/Oct/2026:14:30:01 +0300] \"GET /index.html HTTP/1.1\" 200 1024 \"-\" \"Mozilla/5.0\"";
         assert!(match_http_access(ok_line, 5).is_none());

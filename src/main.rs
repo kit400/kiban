@@ -20,7 +20,7 @@ use tracker::{ BanDecision, IpTracker };
 
 fn print_usage() {
     eprintln!(
-        "kiban v0.1.0 — Ultra-lightweight Fail2Ban alternative (Rust + nftables + ip.space.ua)\n\
+        "kiban v0.1.1 — Ultra-lightweight Fail2Ban alternative (Rust + nftables + ip.space.ua)\n\
          \n\
          USAGE:\n\
            kiban [tui] [-c <kiban.conf>]                   Launch interactive fzf TUI console\n\

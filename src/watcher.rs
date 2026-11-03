@@ -483,6 +483,9 @@ pub fn run_daemon(cfg: &mut Config, config_path: Option<&str>) -> Result<(), Str
                 LogSource::File(p) => {
                     let paths = crate::config::resolve_file_sources(p);
                     for path in paths {
+                        if jail.is_file_excluded(&path) {
+                            continue;
+                        }
                         if let Some(existing) = file_tailers.iter_mut().find(|t| t.path == path) {
                             if !existing.jail_indices.contains(&jail_idx) {
                                 existing.jail_indices.push(jail_idx);
@@ -536,6 +539,7 @@ pub fn run_daemon(cfg: &mut Config, config_path: Option<&str>) -> Result<(), Str
                         cfg.whitelist = new_cfg.whitelist;
                         cfg.whitelist_files = new_cfg.whitelist_files;
                         cfg.whitelist_countries = new_cfg.whitelist_countries;
+                        cfg.exclude_sources = new_cfg.exclude_sources;
                         cfg.ipspace = new_cfg.ipspace;
                         eprintln!(
                             "[kiban] reloaded configuration from '{}' via SIGHUP (whitelist_cidrs={}, files={}, countries={})",

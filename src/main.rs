@@ -20,7 +20,7 @@ use tracker::{ BanDecision, IpTracker };
 
 fn print_usage() {
     eprintln!(
-        "kiban v0.1.2 — Ultra-lightweight Fail2Ban alternative (Rust + nftables + ip.space.ua)\n\
+        "kiban v0.1.3 — Ultra-lightweight Fail2Ban alternative (Rust + nftables + ip.space.ua)\n\
          \n\
          USAGE:\n\
            kiban [tui] [-c <kiban.conf>]                   Launch interactive fzf TUI console\n\
@@ -207,6 +207,9 @@ fn dispatch(subcmd: &str, rest: &[String]) -> Result<(), String> {
             if !cfg.whitelist_countries.is_empty() {
                 println!("Whitelist Countries : {}", cfg.whitelist_countries.join(", "));
             }
+            if !cfg.exclude_sources.is_empty() {
+                println!("Exclude Sources     : {}", cfg.exclude_sources.join(", "));
+            }
             for j in &cfg.jails {
                 let state = if j.enabled { "ACTIVE" } else { "disabled" };
                 let srcs: Vec<String> = j
@@ -217,15 +220,21 @@ fn dispatch(subcmd: &str, rest: &[String]) -> Result<(), String> {
                         config::LogSource::Journal(u) => format!("journal:{u}"),
                     })
                     .collect();
+                let exclude_info = if !j.exclude_sources.is_empty() {
+                    format!(" exclude=[{}]", j.exclude_sources.join(", "))
+                } else {
+                    String::new()
+                };
                 println!(
-                    "  - [{}] {:<12} reason={:<6} maxretry={} findtime={}s bantime={}s sources=[{}]",
+                    "  - [{}] {:<12} reason={:<6} maxretry={} findtime={}s bantime={}s sources=[{}]{}",
                     state,
                     j.name,
                     j.reason,
                     j.maxretry,
                     j.findtime_secs,
                     j.bantime_secs,
-                    srcs.join(", ")
+                    srcs.join(", "),
+                    exclude_info
                 );
             }
             println!("\n=== Active Kernel Bans & Drop Counters (nftables) ===");
@@ -322,9 +331,13 @@ fn run_test_log(cfg: &Config, log_path: &str) -> Result<(), String> {
         .map_err(|e| format!("failed to open log file '{log_path}': {e}"))?;
     let mut reader = BufReader::with_capacity(64 * 1024, file);
     let mut tracker = IpTracker::new(cfg.max_tracked_ips);
+    let log_path_buf = std::path::Path::new(log_path);
 
     let matched_jails: Vec<usize> = (0..cfg.jails.len())
         .filter(|&i| {
+            if cfg.jails[i].is_file_excluded(log_path_buf) {
+                return false;
+            }
             cfg.jails[i].enabled
                 && cfg.jails[i].sources.iter().any(|s| match s {
                     config::LogSource::File(p) => {
@@ -356,9 +369,14 @@ fn run_test_log(cfg: &Config, log_path: &str) -> Result<(), String> {
         matched_jails
     } else {
         (0..cfg.jails.len())
-            .filter(|&i| cfg.jails[i].enabled)
+            .filter(|&i| cfg.jails[i].enabled && !cfg.jails[i].is_file_excluded(log_path_buf))
             .collect()
     };
+
+    if all_jails.is_empty() {
+        println!("[kiban test] file '{log_path}' is excluded by all enabled jails (exclude_sources). Zero events processed.");
+        return Ok(());
+    }
 
     let mut line_buf = Vec::with_capacity(1024);
     let mut total_lines: u64 = 0;

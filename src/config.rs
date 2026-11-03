@@ -208,6 +208,42 @@ pub fn glob_matches(name: &str, pattern: &str) -> bool {
     name == pattern
 }
 
+/// Matches a string against a glob pattern (supports `*` wildcards, case-insensitive, or substring matching).
+pub fn matches_pattern(text: &str, pattern: &str) -> bool {
+    let pat = pattern.trim().to_ascii_lowercase();
+    if pat.is_empty() {
+        return false;
+    }
+    if pat == "*" {
+        return true;
+    }
+    let text = text.to_ascii_lowercase();
+    if !pat.contains('*') {
+        return text == pat || text.contains(&pat);
+    }
+    let parts: Vec<&str> = pat.split('*').collect();
+    let mut remainder = text.as_str();
+    for (i, &part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if i == 0 {
+            if !remainder.starts_with(part) {
+                return false;
+            }
+            remainder = &remainder[part.len()..];
+        } else if i == parts.len() - 1 {
+            return remainder.ends_with(part);
+        } else {
+            match remainder.find(part) {
+                Some(pos) => remainder = &remainder[pos + part.len()..],
+                None => return false,
+            }
+        }
+    }
+    true
+}
+
 pub fn resolve_file_sources(pattern_path: &str) -> Vec<std::path::PathBuf> {
     use std::path::PathBuf;
     let pb = PathBuf::from(pattern_path);
@@ -291,12 +327,31 @@ pub struct JailConfig {
     pub reason: String,
     pub enabled: bool,
     pub sources: Vec<LogSource>,
+    pub exclude_sources: Vec<String>,
     pub parser: ParserKind,
     pub maxretry: u16,
     pub findtime_secs: u32,
     pub bantime_secs: u32,
     pub bantime_multiplier: u16,
     pub max_bantime_secs: u32,
+}
+
+impl JailConfig {
+    /// Returns true if a given log file path or file name matches any pattern in `exclude_sources`.
+    pub fn is_file_excluded(&self, path: &Path) -> bool {
+        if self.exclude_sources.is_empty() {
+            return false;
+        }
+        let full_path = path.to_str().unwrap_or("");
+        let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+
+        for pattern in &self.exclude_sources {
+            if matches_pattern(file_name, pattern) || matches_pattern(full_path, pattern) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -310,6 +365,7 @@ pub struct Config {
     pub whitelist: Vec<Cidr>,
     pub whitelist_files: Vec<String>,
     pub whitelist_countries: Vec<String>,
+    pub exclude_sources: Vec<String>,
     pub ipspace: IpSpaceConfig,
     pub jails: Vec<JailConfig>,
 }
@@ -329,6 +385,7 @@ impl Default for Config {
                 reason: "SSH".to_string(),
                 enabled: true,
                 sources: vec![LogSource::File("/var/log/auth.log".to_string())],
+                exclude_sources: Vec::new(),
                 parser: ParserKind::Sshd,
                 maxretry: 5,
                 findtime_secs: 300,
@@ -342,6 +399,7 @@ impl Default for Config {
                 reason: "WEB".to_string(),
                 enabled: true,
                 sources: vec![LogSource::File("/var/log/nginx/access.log".to_string())],
+                exclude_sources: Vec::new(),
                 parser: ParserKind::HttpAccess { scanner_weight: 5 },
                 maxretry: 5,
                 findtime_secs: 120,
@@ -361,6 +419,7 @@ impl Default for Config {
             whitelist,
             whitelist_files: Vec::new(),
             whitelist_countries: Vec::new(),
+            exclude_sources: Vec::new(),
             ipspace: IpSpaceConfig::default(),
             jails,
         }
@@ -416,7 +475,7 @@ impl Config {
 
             if line.starts_with('[') && line.ends_with(']') {
                 if let Some(jb) = current_jail.take() {
-                    cfg.jails.push(jb.build(next_jail_id)?);
+                    cfg.jails.push(jb.build(next_jail_id, &cfg.exclude_sources)?);
                     next_jail_id = next_jail_id.saturating_add(1);
                 }
 
@@ -507,6 +566,14 @@ impl Config {
                             }
                         }
                     }
+                    "exclude_sources" | "exclude_source" | "ignore_sources" | "ignore_source" | "exclude" => {
+                        for item in val.split(',') {
+                            let pat = item.trim();
+                            if !pat.is_empty() && !cfg.exclude_sources.iter().any(|p| p == pat) {
+                                cfg.exclude_sources.push(pat.to_string());
+                            }
+                        }
+                    }
                     _ => {
                         return Err(format!(
                             "line {line_num}: unknown global key '{key}'"
@@ -541,7 +608,7 @@ impl Config {
         }
 
         if let Some(jb) = current_jail.take() {
-            cfg.jails.push(jb.build(next_jail_id)?);
+            cfg.jails.push(jb.build(next_jail_id, &cfg.exclude_sources)?);
         }
 
         Ok(cfg)
@@ -584,6 +651,7 @@ struct JailBuilder {
     reason: Option<String>,
     enabled: bool,
     sources: Vec<LogSource>,
+    exclude_sources: Vec<String>,
     parser_name: String,
     scanner_weight: u16,
     match_any: Vec<Vec<u8>>,
@@ -603,6 +671,7 @@ impl JailBuilder {
             reason: None,
             enabled: true,
             sources: Vec::new(),
+            exclude_sources: Vec::new(),
             parser_name: "sshd".to_string(),
             scanner_weight: 5,
             match_any: Vec::new(),
@@ -628,6 +697,14 @@ impl JailBuilder {
                             LogSource::parse(part)
                                 .map_err(|e| format!("line {line_num}: {e}"))?,
                         );
+                    }
+                }
+            }
+            "exclude_sources" | "exclude_source" | "ignore_sources" | "ignore_source" | "exclude" => {
+                for part in val.split(',') {
+                    let part = part.trim();
+                    if !part.is_empty() && !self.exclude_sources.iter().any(|s| s == part) {
+                        self.exclude_sources.push(part.to_string());
                     }
                 }
             }
@@ -698,7 +775,13 @@ impl JailBuilder {
         Ok(())
     }
 
-    fn build(self, id: u8) -> Result<JailConfig, String> {
+    fn build(mut self, id: u8, global_excludes: &[String]) -> Result<JailConfig, String> {
+        for g in global_excludes {
+            if !self.exclude_sources.iter().any(|s| s == g) {
+                self.exclude_sources.push(g.clone());
+            }
+        }
+
         if self.enabled && self.sources.is_empty() {
             return Err(format!(
                 "jail '{}' is enabled but has no 'source' configured",
@@ -747,6 +830,7 @@ impl JailBuilder {
             reason: self.reason.unwrap_or(default_reason),
             enabled: self.enabled,
             sources: self.sources,
+            exclude_sources: self.exclude_sources,
             parser,
             maxretry: self.maxretry,
             findtime_secs: self.findtime_secs,
@@ -1042,5 +1126,51 @@ mod tests {
         assert!(!cfg.is_country_whitelisted("US"));
         assert!(!cfg.is_country_whitelisted("NA"));
         assert!(!cfg.is_country_whitelisted(""));
+    }
+
+    #[test]
+    fn test_matches_pattern() {
+        assert!(matches_pattern("kuechentreff.com.ua.log", "*kuechentreff.com.ua*"));
+        assert!(matches_pattern("webmail.kuechentreff.com.ua.error.log", "*kuechentreff.com.ua*"));
+        assert!(matches_pattern("tsg-ua.com.log", "*tsg-ua.com*"));
+        assert!(matches_pattern("tsg-ua.com.log", "tsg-ua.com"));
+        assert!(matches_pattern("/var/log/apache2/domains/tsg-ua.com.log", "*tsg-ua.com*"));
+        assert!(matches_pattern("/var/log/apache2/domains/tsg-ua.com.log", "/var/log/apache2/domains/tsg-ua.com.log"));
+        assert!(!matches_pattern("other-domain.com.log", "*tsg-ua.com*"));
+        assert!(!matches_pattern("other-domain.com.log", "*kuechentreff.com.ua*"));
+        assert!(matches_pattern("KUECHENTREFF.COM.UA.LOG", "*kuechentreff.com.ua*"));
+    }
+
+    #[test]
+    fn test_exclude_sources_and_inheritance() {
+        let sample = r#"
+        [global]
+        exclude_sources = "*kuechentreff.com.ua*, *tsg-ua.com*"
+
+        [jail.http-access]
+        enabled = true
+        source = "file:/var/log/apache2/domains/*.log"
+        parser = "http-access"
+
+        [jail.http-error]
+        enabled = true
+        source = "file:/var/log/apache2/domains/*.error.log"
+        parser = "http-error"
+        exclude_sources = "*secret.domain.com*"
+        "#;
+
+        let cfg = Config::parse_str(sample).unwrap();
+        assert_eq!(cfg.exclude_sources, vec!["*kuechentreff.com.ua*", "*tsg-ua.com*"]);
+        assert_eq!(cfg.jails.len(), 2);
+
+        let j0 = &cfg.jails[0];
+        assert!(j0.is_file_excluded(Path::new("/var/log/apache2/domains/kuechentreff.com.ua.log")));
+        assert!(j0.is_file_excluded(Path::new("/var/log/apache2/domains/tsg-ua.com.log")));
+        assert!(!j0.is_file_excluded(Path::new("/var/log/apache2/domains/random-client.com.log")));
+
+        let j1 = &cfg.jails[1];
+        assert!(j1.is_file_excluded(Path::new("/var/log/apache2/domains/kuechentreff.com.ua.error.log")));
+        assert!(j1.is_file_excluded(Path::new("/var/log/apache2/domains/secret.domain.com.error.log")));
+        assert!(!j1.is_file_excluded(Path::new("/var/log/apache2/domains/random-client.com.error.log")));
     }
 }

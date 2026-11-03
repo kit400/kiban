@@ -1,6 +1,6 @@
 [package]
 name = "kiban"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "Ultra-lightweight Fail2Ban alternative in Rust using epoll, inotify, journald, and nftables sets with kernel timeouts"
 repository = "https://github.com/kit400/kiban"

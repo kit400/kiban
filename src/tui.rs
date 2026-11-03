@@ -790,6 +790,9 @@ fn grep_jail_logs_for_ip(cfg: &Config, ip_needle: &str, max_lines: usize) -> Vec
             if let LogSource::File(path_pattern) = src {
                 let paths = crate::config::resolve_file_sources(path_pattern);
                 for path in paths {
+                    if jail.is_file_excluded(&path) {
+                        continue;
+                    }
                     let path_str = path.display().to_string();
                     if searched_files.contains(&path_str) {
                         continue;

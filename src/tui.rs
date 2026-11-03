@@ -148,14 +148,19 @@ pub fn run_preview(cfg: &Config, raw_target: &str) -> Result<(), String> {
             IpKey::V6Prefix64(p64) => cfg.is_whitelisted_v6_prefix64(p64),
         };
         if wl {
-            println!("  Whitelist Status   : \x1b[1;32mWHITELISTED in kiban.conf\x1b[0m");
+            println!("  Whitelist Status   : \x1b[1;32mWHITELISTED in kiban.conf (CIDR match)\x1b[0m");
         } else {
-            println!("  Whitelist Status   : Not whitelisted");
+            println!("  Whitelist Status   : Not whitelisted by static CIDR");
         }
 
         // 2. Threat Intelligence Dossier from ip.space.ua (for public IPs)
         if !addr.is_loopback() && !is_private_ip(addr) && !cfg.ipspace.token.is_empty() {
             println!("\n\x1b[1;35m=== ip.space.ua Threat Intelligence ===\x1b[0m");
+            if let Ok(v) = ipspace::query_ip(&cfg.ipspace, key, "PREVIEW", "check", false) {
+                if cfg.is_country_whitelisted(&v.country_code) {
+                    println!("  Country Whitelist  : \x1b[1;32mWHITELISTED (GeoIP Country: {})\x1b[0m", v.country_code);
+                }
+            }
             match ipspace::fetch_dossier_summary(&cfg.ipspace, key) {
                 Ok(dossier) => println!("{dossier}"),
                 Err(e) => println!("  Lookup note: {e}"),

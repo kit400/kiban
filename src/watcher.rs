@@ -534,11 +534,15 @@ pub fn run_daemon(cfg: &mut Config, config_path: Option<&str>) -> Result<(), Str
                 match Config::load_from_file(p) {
                     Ok(new_cfg) => {
                         cfg.whitelist = new_cfg.whitelist;
+                        cfg.whitelist_files = new_cfg.whitelist_files;
+                        cfg.whitelist_countries = new_cfg.whitelist_countries;
                         cfg.ipspace = new_cfg.ipspace;
                         eprintln!(
-                            "[kiban] reloaded configuration from '{}' via SIGHUP (whitelist_cidrs={})",
+                            "[kiban] reloaded configuration from '{}' via SIGHUP (whitelist_cidrs={}, files={}, countries={})",
                             p,
-                            cfg.whitelist.len()
+                            cfg.whitelist.len(),
+                            cfg.whitelist_files.join(","),
+                            cfg.whitelist_countries.join(",")
                         );
                     }
                     Err(e) => eprintln!("[kiban] SIGHUP reload failed: {e}"),

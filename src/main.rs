@@ -20,7 +20,7 @@ use tracker::{ BanDecision, IpTracker };
 
 fn print_usage() {
     eprintln!(
-        "kiban v0.1.1 — Ultra-lightweight Fail2Ban alternative (Rust + nftables + ip.space.ua)\n\
+        "kiban v0.1.2 — Ultra-lightweight Fail2Ban alternative (Rust + nftables + ip.space.ua)\n\
          \n\
          USAGE:\n\
            kiban [tui] [-c <kiban.conf>]                   Launch interactive fzf TUI console\n\
@@ -155,8 +155,15 @@ fn dispatch(subcmd: &str, rest: &[String]) -> Result<(), String> {
             let action = positional.get(2).map(|s| s.as_str()).unwrap_or("check");
             let ip = parse_cli_ip(ip_str)?;
             let verdict = ipspace::query_ip(&cfg.ipspace, ip, reason, action, cfg.dry_run)?;
+            let country_wl = cfg.is_country_whitelisted(&verdict.country_code);
+            let cidr_wl = match ip {
+                IpKey::V4(v4) => cfg.is_whitelisted_v4(v4),
+                IpKey::V6Prefix64(p64) => cfg.is_whitelisted_v6_prefix64(p64),
+            };
+            let whitelisted = verdict.is_whitelisted || country_wl || cidr_wl;
+            let instant_ban = !whitelisted && verdict.should_ban_immediately(cfg.ipspace.risk_threshold);
             println!(
-                "IP: {} | action={} | recommendedAction={} | recommendedTtl={}s | riskScore={} | country={} | lists={} | whitelisted={} | instant_ban={}",
+                "IP: {} | action={} | recommendedAction={} | recommendedTtl={}s | riskScore={} | country={} | lists={} | whitelisted={} (cidr={}, country_wl={}) | instant_ban={}",
                 ipspace::format_ip_for_api(ip),
                 verdict.action,
                 verdict.recommended_action,
@@ -164,8 +171,10 @@ fn dispatch(subcmd: &str, rest: &[String]) -> Result<(), String> {
                 verdict.risk_score,
                 verdict.country_code,
                 verdict.num_lists_found,
-                verdict.is_whitelisted,
-                verdict.should_ban_immediately(cfg.ipspace.risk_threshold)
+                whitelisted,
+                cidr_wl,
+                country_wl,
+                instant_ban
             );
             Ok(())
         }
@@ -191,7 +200,13 @@ fn dispatch(subcmd: &str, rest: &[String]) -> Result<(), String> {
                 cfg.ipspace.source,
                 cfg.ipspace.risk_threshold
             );
-            println!("Whitelist CIDRs : {}", cfg.whitelist.len());
+            println!("Whitelist CIDRs     : {}", cfg.whitelist.len());
+            if !cfg.whitelist_files.is_empty() {
+                println!("Whitelist Files     : {}", cfg.whitelist_files.join(", "));
+            }
+            if !cfg.whitelist_countries.is_empty() {
+                println!("Whitelist Countries : {}", cfg.whitelist_countries.join(", "));
+            }
             for j in &cfg.jails {
                 let state = if j.enabled { "ACTIVE" } else { "disabled" };
                 let srcs: Vec<String> = j
@@ -228,6 +243,16 @@ fn dispatch(subcmd: &str, rest: &[String]) -> Result<(), String> {
                 None => 3600,
             };
             let ip = parse_cli_ip(ip_str)?;
+            let is_wl = match ip {
+                IpKey::V4(v4) => cfg.is_whitelisted_v4(v4),
+                IpKey::V6Prefix64(p64) => cfg.is_whitelisted_v6_prefix64(p64),
+            };
+            if is_wl {
+                return Err(format!(
+                    "refusing to ban {}: IP is explicitly WHITELISTED in kiban.conf",
+                    ip.format_nft()
+                ));
+            }
             let mut fw = Firewall::new(&cfg);
             fw.ban_single(ip, duration_secs)?;
             println!("Banned {} for {}s", ip.format_nft(), duration_secs);

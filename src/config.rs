@@ -121,6 +121,37 @@ pub fn ip_to_subnet_cidr(s: &str) -> Result<String, String> {
     }
 }
 
+/// Loads CIDR entries from a plain-text file (one CIDR per line, ignoring `#` comments and empty lines).
+/// Appends valid non-duplicate CIDRs to `whitelist`. Returns count of newly added CIDRs.
+pub fn load_cidr_file<P: AsRef<Path>>(path: P, whitelist: &mut Vec<Cidr>) -> Result<usize, String> {
+    let content = fs::read_to_string(path.as_ref()).map_err(|e| {
+        format!("failed to read CIDR file '{}': {e}", path.as_ref().display())
+    })?;
+    let mut added = 0usize;
+    for (line_idx, raw_line) in content.lines().enumerate() {
+        let line = strip_comment(raw_line).trim();
+        if line.is_empty() {
+            continue;
+        }
+        match Cidr::parse(line) {
+            Ok(cidr) => {
+                if !whitelist.contains(&cidr) {
+                    whitelist.push(cidr);
+                    added += 1;
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "[kiban] warning: {}:{}: {e}",
+                    path.as_ref().display(),
+                    line_idx + 1
+                );
+            }
+        }
+    }
+    Ok(added)
+}
+
 /// Log source definition for a jail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogSource {
@@ -277,6 +308,8 @@ pub struct Config {
     pub max_tracked_ips: usize,
     pub dry_run: bool,
     pub whitelist: Vec<Cidr>,
+    pub whitelist_files: Vec<String>,
+    pub whitelist_countries: Vec<String>,
     pub ipspace: IpSpaceConfig,
     pub jails: Vec<JailConfig>,
 }
@@ -326,6 +359,8 @@ impl Default for Config {
             max_tracked_ips: 8192,
             dry_run: false,
             whitelist,
+            whitelist_files: Vec::new(),
+            whitelist_countries: Vec::new(),
             ipspace: IpSpaceConfig::default(),
             jails,
         }
@@ -425,11 +460,50 @@ impl Config {
                         cfg.whitelist.clear();
                         for item in val.split(',') {
                             let item = item.trim();
-                            if !item.is_empty() {
+                            if item.is_empty() {
+                                continue;
+                            }
+                            if let Some(file_path) = item.strip_prefix("file:") {
+                                let fpath = file_path.trim();
+                                if !fpath.is_empty() {
+                                    match load_cidr_file(fpath, &mut cfg.whitelist) {
+                                        Ok(_) => {
+                                            if !cfg.whitelist_files.iter().any(|f| f == fpath) {
+                                                cfg.whitelist_files.push(fpath.to_string());
+                                            }
+                                        }
+                                        Err(e) => return Err(format!("line {line_num}: {e}")),
+                                    }
+                                }
+                            } else {
                                 cfg.whitelist.push(
                                     Cidr::parse(item)
                                         .map_err(|e| format!("line {line_num}: {e}"))?,
                                 );
+                            }
+                        }
+                    }
+                    "whitelist_file" | "whitelist_files" => {
+                        for item in val.split(',') {
+                            let fpath = item.trim();
+                            if fpath.is_empty() {
+                                continue;
+                            }
+                            match load_cidr_file(fpath, &mut cfg.whitelist) {
+                                Ok(_) => {
+                                    if !cfg.whitelist_files.iter().any(|f| f == fpath) {
+                                        cfg.whitelist_files.push(fpath.to_string());
+                                    }
+                                }
+                                Err(e) => return Err(format!("line {line_num}: {e}")),
+                            }
+                        }
+                    }
+                    "whitelist_countries" | "whitelist_country" | "country_whitelist" => {
+                        for item in val.split(',') {
+                            let cc = item.trim().to_ascii_uppercase();
+                            if !cc.is_empty() && !cfg.whitelist_countries.contains(&cc) {
+                                cfg.whitelist_countries.push(cc);
                             }
                         }
                     }
@@ -491,6 +565,17 @@ impl Config {
             }
         }
         false
+    }
+
+    #[inline]
+    pub fn is_country_whitelisted(&self, country_code: &str) -> bool {
+        let code = country_code.trim();
+        if code.is_empty() || code == "NA" || code == "-" {
+            return false;
+        }
+        self.whitelist_countries
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case(code))
     }
 }
 
@@ -940,5 +1025,22 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(added.contains("203.0.113.0/24"));
+    }
+
+    #[test]
+    fn test_country_and_file_whitelist_parsing() {
+        let sample = r#"
+        [global]
+        whitelist = "127.0.0.0/8, ::1/128"
+        whitelist_countries = "UA, DE, PL"
+        "#;
+        let cfg = Config::parse_str(sample).unwrap();
+        assert_eq!(cfg.whitelist_countries, vec!["UA", "DE", "PL"]);
+        assert!(cfg.is_country_whitelisted("UA"));
+        assert!(cfg.is_country_whitelisted("ua"));
+        assert!(cfg.is_country_whitelisted("DE"));
+        assert!(!cfg.is_country_whitelisted("US"));
+        assert!(!cfg.is_country_whitelisted("NA"));
+        assert!(!cfg.is_country_whitelisted(""));
     }
 }

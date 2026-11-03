@@ -231,7 +231,7 @@ impl IpTracker {
         if (slot.flags & FLAG_API_CHECKED) == 0 {
             slot.flags |= FLAG_API_CHECKED;
             if let Some(verdict) = lookup_fn(ip, &jail.reason) {
-                if verdict.is_allow() {
+                if verdict.is_allow() || cfg.is_country_whitelisted(&verdict.country_code) {
                     slot.flags |= FLAG_API_ALLOW;
                     self.whitelisted_hits += 1;
                     return None;
@@ -449,5 +449,32 @@ mod tests {
         }
         assert_eq!(tracker.whitelisted_hits, 20);
         assert_eq!(tracker.total_bans, 0);
+    }
+
+    #[test]
+    fn test_country_whitelist_never_banned() {
+        let mut cfg = Config::default();
+        cfg.whitelist_countries = vec!["UA".to_string()];
+        let jail = &cfg.jails[0];
+        let mut tracker = IpTracker::new(256);
+
+        // Even an aggressive attacking IP with high risk score will NOT be banned if countryCode is UA
+        let ua_ip = IpKey::V4(u32::from(Ipv4Addr::new(176, 37, 120, 53)));
+        for t in 100..120 {
+            let res = tracker.record_offense_with_hook(&cfg, jail, ua_ip, 5, t, |_, _| {
+                Some(IpSpaceVerdict {
+                    action: "found".to_string(),
+                    recommended_action: "ban".to_string(),
+                    recommended_ttl: 604800,
+                    risk_score: 99,
+                    is_whitelisted: false,
+                    country_code: "UA".to_string(),
+                    num_lists_found: 10,
+                })
+            });
+            assert!(res.is_none(), "Ukrainian IP must NEVER be banned");
+        }
+        assert_eq!(tracker.total_bans, 0);
+        assert!(tracker.whitelisted_hits >= 20);
     }
 }

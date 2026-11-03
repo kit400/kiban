@@ -21,6 +21,14 @@ dry_run = false
 # Comma-separated list of whitelisted IPv4/IPv6 addresses and CIDR subnets
 whitelist = "127.0.0.0/8, ::1/128, fe80::/10, 10.0.0.0/8, 192.168.0.0/16"
 
+# Optional external zone files with CIDRs (e.g. Ukraine IP blocks from ipdeny.com)
+# All subnets are loaded into fast in-memory CIDR mask lookup on daemon startup/reload.
+# whitelist_files = "/etc/kiban/geo/ua.zone"
+
+# Comma-separated ISO-2 country codes to exclude from banning via GeoIP (case-insensitive)
+# When ip.space.ua returns a matching country, the IP is automatically whitelisted and never banned.
+# whitelist_countries = "UA"
+
 
 # -----------------------------------------------------------------------------
 # ip.space.ua Threat Intelligence API Integration
